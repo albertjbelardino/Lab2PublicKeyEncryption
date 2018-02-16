@@ -1,19 +1,36 @@
 package edu.temple.albertjbelardino.lab2publickeyencryption;
 
 import android.content.ContentProvider;
+import android.content.ContentResolver;
 import android.content.ContentUris;
 import android.content.ContentValues;
 import android.content.Context;
 import android.content.UriMatcher;
+import android.database.CharArrayBuffer;
+import android.database.ContentObserver;
 import android.database.Cursor;
+import android.database.DataSetObserver;
 import android.database.sqlite.SQLiteDatabase;
 import android.database.sqlite.SQLiteOpenHelper;
 import android.database.sqlite.SQLiteQueryBuilder;
 import android.net.Uri;
+import android.os.Bundle;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.widget.Toast;
 
+import java.math.BigInteger;
+import java.security.KeyFactory;
+import java.security.KeyPair;
+import java.security.KeyPairGenerator;
+import java.security.NoSuchAlgorithmException;
+import java.security.PrivateKey;
+import java.security.PublicKey;
+import java.security.interfaces.RSAKey;
+import java.security.spec.InvalidKeySpecException;
+import java.security.spec.RSAPrivateKeySpec;
+import java.security.spec.RSAPublicKeySpec;
+import java.util.Base64;
 import java.util.HashMap;
 
 /**
@@ -27,60 +44,273 @@ public class KeyPairProvider extends ContentProvider {
     static final String URL = "content://" + PROVIDER_NAME + "/cryptographicKeyPairs";
     static final Uri CONTENT_URL = Uri.parse(URL);
 
-    static final String publicExponent = "publicExponent";
-    static final String privateExponent = "privateExponent";
-    static final String modulus = "modulus";
     static final int uriCode = 1;
 
     private static HashMap<String, String> values;
 
-    static final UriMatcher uriMatcher;
-
-    static {
-        uriMatcher = new UriMatcher(UriMatcher.NO_MATCH);
-        uriMatcher.addURI(PROVIDER_NAME, "cryptographicKeyPairs", uriCode);
-    }
-
-    private SQLiteDatabase sqlDB;
-    static final String DATABASE_NAME = "cryptographicKeyPairs";
-    static final String TABLE_NAME = "keyPairs";
-    static final int DATABASE_VERSION = 1;
-    static final String CREATE_DB_TABLE = " CREATE TABLE " + TABLE_NAME
-            + " (publicExponent TEXT NOT NULL PRIMARY KEY, "
-            + " privateExponent TEXT NOT NULL, " +
-            " modulus TEXT NOT NULL);";
-
-
     @Override
     public boolean onCreate() {
-        DatabaseHelper dbHelper = new DatabaseHelper(getContext());
-        sqlDB = dbHelper.getWritableDatabase();
-        if (sqlDB != null) {
-            return true;
-        }
-        return false;
+        return true;
     }
         @Override
-        public Cursor query(Uri uri, String[] cols, String selection, String[] selectionArgs, String sortOrder) {
+        public Cursor query(Uri uri, final String[] cols, String selection, String[] selectionArgs, String sortOrder) {
+            final KeyPair keyPair = generateKeyPair();
 
-            SQLiteQueryBuilder queryBuilder = new SQLiteQueryBuilder();
+            PublicKey publicKey = keyPair.getPublic();
+            PrivateKey privateKey = keyPair.getPrivate();
+            final RSAPrivateKeySpec priv;
+            final RSAPublicKeySpec pub;
+            final Bundle bundle = new Bundle();
 
-            queryBuilder.setTables(TABLE_NAME);
+            bundle.putString("publicKey", android.util.Base64.encodeToString(publicKey.getEncoded(), 0));
+            bundle.putString("privateKey", android.util.Base64.encodeToString(privateKey.getEncoded(), 0));
 
-            switch (uriMatcher.match(uri)) {
-                case uriCode:
-                    queryBuilder.setProjectionMap(values);
-                    break;
-                default:
-                    throw new IllegalArgumentException("Unknown URI " + uri);
+            KeyFactory fact;
+
+            try {
+
+                fact = KeyFactory.getInstance("RSA");
+
+                priv = fact.getKeySpec(keyPair.getPrivate(),
+                        RSAPrivateKeySpec.class);
+                pub = fact.getKeySpec(keyPair.getPublic(),
+                        RSAPublicKeySpec.class);
+
+
+            } catch (NoSuchAlgorithmException e) {
+                e.printStackTrace();
+            } catch (InvalidKeySpecException e) {
+                e.printStackTrace();
             }
 
-            Cursor cursor = queryBuilder.query(sqlDB, cols, selection, selectionArgs, null,
-                    null, sortOrder);
 
-            cursor.setNotificationUri(getContext().getContentResolver(), uri);
+            final Cursor cursor = new Cursor() {
+                @Override
+                public int getCount() {
+                    return 0;
+                }
+
+                @Override
+                public int getPosition() {
+                    return 0;
+                }
+
+                @Override
+                public boolean move(int i) {
+                    return false;
+                }
+
+                @Override
+                public boolean moveToPosition(int i) {
+                    return false;
+                }
+
+                @Override
+                public boolean moveToFirst() {
+                    return false;
+                }
+
+                @Override
+                public boolean moveToLast() {
+                    return false;
+                }
+
+                @Override
+                public boolean moveToNext() {
+                    return false;
+                }
+
+                @Override
+                public boolean moveToPrevious() {
+                    return false;
+                }
+
+                @Override
+                public boolean isFirst() {
+                    return false;
+                }
+
+                @Override
+                public boolean isLast() {
+                    return false;
+                }
+
+                @Override
+                public boolean isBeforeFirst() {
+                    return false;
+                }
+
+                @Override
+                public boolean isAfterLast() {
+                    return false;
+                }
+
+                @Override
+                public int getColumnIndex(String s) {
+                    return 0;
+                }
+
+                @Override
+                public int getColumnIndexOrThrow(String s) throws IllegalArgumentException {
+                    return 0;
+                }
+
+                @Override
+                public String getColumnName(int i) {
+                    return null;
+                }
+
+                @Override
+                public String[] getColumnNames() {
+                    return new String[0];
+                }
+
+                @Override
+                public int getColumnCount() {
+                    return 0;
+                }
+
+                @Override
+                public byte[] getBlob(int i) {
+                    return new byte[0];
+                }
+
+                @Override
+                public String getString(int i) {
+                    return null;
+                }
+
+                @Override
+                public void copyStringToBuffer(int i, CharArrayBuffer charArrayBuffer) {
+
+                }
+
+                @Override
+                public short getShort(int i) {
+                    return 0;
+                }
+
+                @Override
+                public int getInt(int i) {
+                    return 0;
+                }
+
+                @Override
+                public long getLong(int i) {
+                    return 0;
+                }
+
+                @Override
+                public float getFloat(int i) {
+                    return 0;
+                }
+
+                @Override
+                public double getDouble(int i) {
+                    return 0;
+                }
+
+                @Override
+                public int getType(int i) {
+                    return 0;
+                }
+
+                @Override
+                public boolean isNull(int i) {
+                    return false;
+                }
+
+                @Override
+                public void deactivate() {
+
+                }
+
+                @Override
+                public boolean requery() {
+                    return false;
+                }
+
+                @Override
+                public void close() {
+
+                }
+
+                @Override
+                public boolean isClosed() {
+                    return false;
+                }
+
+                @Override
+                public void registerContentObserver(ContentObserver contentObserver) {
+
+                }
+
+                @Override
+                public void unregisterContentObserver(ContentObserver contentObserver) {
+
+                }
+
+                @Override
+                public void registerDataSetObserver(DataSetObserver dataSetObserver) {
+
+                }
+
+                @Override
+                public void unregisterDataSetObserver(DataSetObserver dataSetObserver) {
+
+                }
+
+                @Override
+                public void setNotificationUri(ContentResolver contentResolver, Uri uri) {
+
+                }
+
+                @Override
+                public Uri getNotificationUri() {
+                    return null;
+                }
+
+                @Override
+                public boolean getWantsAllOnMoveCalls() {
+                    return false;
+                }
+
+                @Override
+                public void setExtras(Bundle bundle) {
+
+                }
+
+                @Override
+                public Bundle getExtras() {
+                    return bundle;
+                }
+
+                @Override
+                public Bundle respond(Bundle bundle) {
+                    return null;
+                }
+            };
+
             return cursor;
         }
+
+    public KeyPair generateKeyPair() {
+
+        KeyPair keyPair = null;
+
+        try {
+            KeyPairGenerator keyPairGenerator;
+
+            keyPairGenerator = KeyPairGenerator.getInstance("RSA");
+            keyPairGenerator.initialize(1024);
+            keyPair = keyPairGenerator.generateKeyPair();
+
+        } catch (NoSuchAlgorithmException e) {
+            e.printStackTrace();
+        }
+
+        return keyPair;
+    }
 
     @Nullable
     @Override
@@ -91,18 +321,6 @@ public class KeyPairProvider extends ContentProvider {
     @Nullable
     @Override
     public Uri insert(@NonNull Uri uri, @Nullable ContentValues values) {
-
-        long rowID = sqlDB.insert(TABLE_NAME, null, values);
-
-        if (rowID > 0) {
-
-            Uri _uri = ContentUris.withAppendedId(CONTENT_URL, rowID);
-
-            getContext().getContentResolver().notifyChange(_uri, null);
-
-            return _uri;
-        }
-        Toast.makeText(getContext(), "Row Insert Failed", Toast.LENGTH_LONG).show();
         return null;
     }
 
@@ -116,20 +334,4 @@ public class KeyPairProvider extends ContentProvider {
         return 0;
     }
 
-    private static class DatabaseHelper extends SQLiteOpenHelper {
-        DatabaseHelper(Context context) {
-            super(context, DATABASE_NAME, null, DATABASE_VERSION);
-        }
-
-        @Override
-        public void onCreate(SQLiteDatabase sqlDB) {
-            sqlDB.execSQL(CREATE_DB_TABLE);
-        }
-
-        @Override
-        public void onUpgrade(SQLiteDatabase sqlDB, int oldVersion, int newVersion) {
-            sqlDB.execSQL("DROP TABLE IF EXISTS " + TABLE_NAME);
-            onCreate(sqlDB);
-        }
-    }
 }
