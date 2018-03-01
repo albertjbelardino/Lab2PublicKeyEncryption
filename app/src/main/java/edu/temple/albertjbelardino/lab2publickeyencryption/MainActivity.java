@@ -1,31 +1,39 @@
 package edu.temple.albertjbelardino.lab2publickeyencryption;
 
+import android.app.PendingIntent;
 import android.content.ContentResolver;
-import android.content.ContentValues;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.database.Cursor;
 import android.net.Uri;
-import android.support.v7.app.AppCompatActivity;
+import android.nfc.NdefMessage;
+import android.nfc.NdefRecord;
+import android.nfc.NfcAdapter;
+import android.nfc.NfcEvent;
 import android.os.Bundle;
+import android.os.Parcelable;
+import android.support.v7.app.AppCompatActivity;
 import android.util.Base64;
 import android.view.View;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
-import android.widget.Toast;
 
-import java.math.BigInteger;
+import org.spongycastle.util.io.pem.PemGenerationException;
+import org.spongycastle.util.io.pem.PemObject;
+import org.spongycastle.util.io.pem.PemObjectGenerator;
+import org.spongycastle.util.io.pem.PemWriter;
+
+import java.io.IOException;
+import java.io.StringWriter;
 import java.security.InvalidKeyException;
-import java.security.Key;
 import java.security.KeyFactory;
-import java.security.KeyPair;
-import java.security.KeyPairGenerator;
 import java.security.NoSuchAlgorithmException;
 import java.security.PrivateKey;
 import java.security.PublicKey;
+import java.security.Security;
 import java.security.spec.InvalidKeySpecException;
 import java.security.spec.PKCS8EncodedKeySpec;
-import java.security.spec.RSAPrivateKeySpec;
-import java.security.spec.RSAPublicKeySpec;
 import java.security.spec.X509EncodedKeySpec;
 
 import javax.crypto.BadPaddingException;
@@ -33,7 +41,7 @@ import javax.crypto.Cipher;
 import javax.crypto.IllegalBlockSizeException;
 import javax.crypto.NoSuchPaddingException;
 
-import static javax.crypto.Cipher.*;
+import static javax.crypto.Cipher.getInstance;
 
 public class MainActivity extends AppCompatActivity {
     Button requestKeyPairButton;
@@ -50,15 +58,44 @@ public class MainActivity extends AppCompatActivity {
 
     ContentResolver resolver;
 
+    PemObject messagePemObj;
+    PemObject pubKeyPemObj;
+
+    NdefMessage ndefMessage;
+
+    PendingIntent pi;
+    Intent intent;
+
+    IntentFilter[] intentFiltersArray;
+
     // The URL used to target the content provider
-    static final Uri CONTENT_URL =
-            Uri.parse("content://edu.temple.albertjbelardino." +
-                    "lab2publickeyencryption.KeyPairProvider/cryptographicKeyPairs");
+    static final Uri CONTENT_URL = Contract.CONTENT_URL;
+
+    static {
+        Security.insertProviderAt(new org.spongycastle.jce.provider.BouncyCastleProvider(), 1);
+    }
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        NfcAdapter nfcAdapter;
+        nfcAdapter = NfcAdapter.getDefaultAdapter(this);
+
+        if(nfcAdapter != null)
+            nfcAdapter.setNdefPushMessageCallback(null, this, this);
+
+        pi = PendingIntent.getActivity(
+                this, 0, new Intent(this, getClass()).addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP), 0);
+
+        IntentFilter ndefFilter = new IntentFilter(NfcAdapter.ACTION_NDEF_DISCOVERED);
+        try {
+            ndefFilter.addDataType("*/*");
+        } catch (IntentFilter.MalformedMimeTypeException e) {
+            e.printStackTrace();
+        }
+        intentFiltersArray = new IntentFilter[] {ndefFilter};
 
         requestKeyPairButton = (Button) findViewById(R.id.requestPairButton);
         encryptButton = (Button) findViewById(R.id.encryptButton);
@@ -77,7 +114,7 @@ public class MainActivity extends AppCompatActivity {
                 Cursor cursor = resolver.query(CONTENT_URL, null, null, null, null);
                 Bundle b = cursor.getExtras();
 
-                byte[] publicBytes = android.util.Base64.decode(b.getString("publicKey"), 0);
+                byte[] publicBytes = Base64.decode(b.getString("publicKey"), Base64.NO_PADDING);
                 X509EncodedKeySpec keySpec = new X509EncodedKeySpec(publicBytes);
                 KeyFactory keyFactory = null;
                 try {
@@ -90,7 +127,7 @@ public class MainActivity extends AppCompatActivity {
                     e.printStackTrace();
                 }
 
-                byte[] privateBytes = android.util.Base64.decode(b.getString("privateKey"), 0);
+                byte[] privateBytes = Base64.decode(b.getString("privateKey"), Base64.NO_PADDING);
                 PKCS8EncodedKeySpec keySpec1 = new PKCS8EncodedKeySpec(privateBytes);
                 try {
                     keyFactory = KeyFactory.getInstance("RSA");
@@ -105,33 +142,6 @@ public class MainActivity extends AppCompatActivity {
                 }
 
                 requestKeyPairButton.setClickable(false);
-
-                /*
-                try {
-                    keyPairGenerator = KeyPairGenerator.getInstance("RSA");
-                    keyPairGenerator.initialize(1024);
-                    keyPair = keyPairGenerator.generateKeyPair();
-
-                    KeyFactory fact = KeyFactory.getInstance("RSA");
-                    pub = fact.getKeySpec(keyPair.getPublic(),
-                            RSAPublicKeySpec.class);
-                    priv = fact.getKeySpec(keyPair.getPrivate(),
-                            RSAPrivateKeySpec.class);
-                } catch (NoSuchAlgorithmException e) {
-                    e.printStackTrace();
-                } catch (InvalidKeySpecException e) {
-                    e.printStackTrace();
-                }
-
-                ContentValues values = new ContentValues();
-
-                values.put("publicExponent", pub.getPublicExponent().toString());
-                values.put("privateExponent", priv.getPrivateExponent().toString());
-                values.put("modulus", pub.getModulus().toString());
-
-                resolver.insert(CONTENT_URL, values);
-                Toast.makeText(MainActivity.this, "New Key Pair Added", Toast.LENGTH_SHORT).show();
-                */
             }
 
 
@@ -157,37 +167,6 @@ public class MainActivity extends AppCompatActivity {
 
                 requestKeyPairButton.setClickable(false);
                 encryptButton.setClickable(false);
-
-                /*
-                //get message from edit text
-                message = messageEditText.getText().toString();
-                String pub, priv, mod;
-                pub = priv = mod = "";
-                PrivateKey pk;
-
-                //get key value pair from key provider
-                String[] cols = new String[]{"publicExponent", "privateExponent", "modulus"};
-
-                Cursor cursor = resolver.query(CONTENT_URL, cols, null, null, null);
-
-                if(cursor.moveToFirst()){
-
-                    do{
-                        pub = cursor.getString(cursor.getColumnIndex("publicExponent"));
-                        priv = cursor.getString(cursor.getColumnIndex("privateExponent"));
-                        mod = cursor.getString(cursor.getColumnIndex("modulus"));
-                    }while (cursor.moveToNext());
-
-                }
-
-                //encrypt message
-                try {
-                    encryptMessage(message, pub, priv, mod);
-                } catch (NoSuchPaddingException | InvalidKeySpecException | InvalidKeyException
-                        | IllegalBlockSizeException | BadPaddingException | NoSuchAlgorithmException e) {
-                    e.printStackTrace();
-                }
-                */
             }
         });
 
@@ -207,43 +186,6 @@ public class MainActivity extends AppCompatActivity {
                 } catch (InvalidKeyException e) {
                     e.printStackTrace();
                 }
-                /*
-                //get message from encrypted message text view
-                String message = encryptedTextView.getText().toString();
-                //get key value pair from key provider
-                String pub, priv, mod;
-                pub = priv = mod = "";
-
-                //get key value pair from key provider
-                String[] cols = new String[]{"publicExponent", "privateExponent", "modulus"};
-
-                Cursor cursor = resolver.query(CONTENT_URL, cols, null, null, null);
-
-                if(cursor.moveToFirst()){
-
-                    do{
-                        pub = cursor.getString(cursor.getColumnIndex("publicExponent"));
-                        priv = cursor.getString(cursor.getColumnIndex("privateExponent"));
-                        mod = cursor.getString(cursor.getColumnIndex("modulus"));
-                    }while (cursor.moveToNext());
-                }
-                //decrypt message
-                try {
-                    decryptMessage(message, pub, priv, mod);
-                } catch (NoSuchAlgorithmException e) {
-                    e.printStackTrace();
-                } catch (InvalidKeySpecException e) {
-                    e.printStackTrace();
-                } catch (NoSuchPaddingException e) {
-                    e.printStackTrace();
-                } catch (InvalidKeyException e) {
-                    e.printStackTrace();
-                } catch (BadPaddingException e) {
-                    e.printStackTrace();
-                } catch (IllegalBlockSizeException e) {
-                    e.printStackTrace();
-                }
-                */
             }
         });
     }
@@ -252,46 +194,11 @@ public class MainActivity extends AppCompatActivity {
         Cipher cipher = getInstance("RSA");
         cipher.init(Cipher.DECRYPT_MODE, publicKey);
 
-        byte[] s = cipher.doFinal(android.util.Base64.decode(encryptedTextView.getText().toString(), Base64.NO_PADDING));
-        decryptedTextView.setText(android.util.Base64.encodeToString(s, 0));
+        byte[] s = cipher.doFinal(Base64.decode(encryptedTextView.getText().toString(), Base64.NO_PADDING));
+        decryptedTextView.setText(Base64.encodeToString(s, Base64.NO_PADDING));
         requestKeyPairButton.setClickable(true);
         encryptButton.setClickable(true);
     }
-    /*
-    private void decryptMessage(String message, String pub, String priv, String mod)
-            throws NoSuchAlgorithmException, InvalidKeySpecException, NoSuchPaddingException,
-            InvalidKeyException, BadPaddingException, IllegalBlockSizeException {
-        BigInteger publicExp = new BigInteger(pub);
-        BigInteger privateExp = new BigInteger(priv);
-        BigInteger modulus = new BigInteger(mod);
-
-        RSAPublicKeySpec spec = new RSAPublicKeySpec(modulus, publicExp);
-        PublicKey publicKey = (KeyFactory.getInstance("RSA")).generatePublic(spec);
-
-        Cipher cipher = Cipher.getInstance("RSA");
-        cipher.init(Cipher.DECRYPT_MODE, publicKey);
-
-        decryptedTextView.setText(cipher.doFinal(message.getBytes()).toString());
-    }
-    */
-    /*
-    public void displayPubAndPriv(){
-
-        String[] cols = new String[]{"publicExponent", "privateExponent", "modulus"};
-
-        Cursor cursor = resolver.query(CONTENT_URL, cols, null, null, null);
-
-        if(cursor.moveToFirst()){
-
-            do{
-                encryptedTextView.setText(cursor.getString(cursor.getColumnIndex("publicExponent")));
-                decryptedTextView.setText(cursor.getString(cursor.getColumnIndex("privateExponent")));
-                messageEditText.setText(cursor.getString(cursor.getColumnIndex("modulus")));
-            }while (cursor.moveToNext());
-
-        }
-    }
-    */
 
     public void encryptMessage() throws NoSuchPaddingException, NoSuchAlgorithmException,
             InvalidKeyException, BadPaddingException, IllegalBlockSizeException {
@@ -299,8 +206,8 @@ public class MainActivity extends AppCompatActivity {
         try {
             Cipher cipher = Cipher.getInstance("RSA");
             cipher.init(Cipher.ENCRYPT_MODE, privateKey);
-            byte[] s = cipher.doFinal(android.util.Base64.decode(messageEditText.getText().toString(), Base64.NO_PADDING));
-            encryptedTextView.setText(android.util.Base64.encodeToString(s, 0));
+            byte[] s = cipher.doFinal(Base64.decode(encryptedTextView.getText().toString(), Base64.NO_PADDING));
+            encryptedTextView.setText(Base64.encodeToString(s, Base64.NO_PADDING));
         } catch (NoSuchAlgorithmException e) {
             e.printStackTrace();
             encryptedTextView.setText("no such algorithm exception");
@@ -316,54 +223,76 @@ public class MainActivity extends AppCompatActivity {
             e.printStackTrace();
         }
     }
-    /*
-    public void encryptMessage(String message, String pubExp, String privExp, String mod)
-            throws NoSuchPaddingException, NoSuchAlgorithmException, InvalidKeySpecException,
-            InvalidKeyException, BadPaddingException, IllegalBlockSizeException {
-        BigInteger publicExp = new BigInteger(pubExp);
-        BigInteger privateExp = new BigInteger(privExp);
-        BigInteger modulus = new BigInteger(mod);
 
-        RSAPrivateKeySpec spec = new RSAPrivateKeySpec(modulus, privateExp);
-        PrivateKey privateKey = (KeyFactory.getInstance("RSA")).generatePrivate(spec);
-
-        Cipher cipher = Cipher.getInstance("RSA");
-        cipher.init(Cipher.ENCRYPT_MODE, privateKey);
-
-        encryptedTextView.setText(cipher.doFinal(message.getBytes()).toString());
-    }
-    */
-
-    /*
-    public static PublicKey stringToPublicKey(byte[] key){
-        try{
-            byte[] byteKey = Base64.decode(key, Base64.DEFAULT);
-            X509EncodedKeySpec X509publicKey = new X509EncodedKeySpec(byteKey);
-            KeyFactory kf = KeyFactory.getInstance("RSA");
-
-            return kf.generatePublic(X509publicKey);
-        }
-        catch(Exception e){
+    public String generatePubKeyPEM() {
+        StringWriter sw = new StringWriter();
+        PemWriter pw = new PemWriter(sw);
+        try {
+            pw.writeObject(new PemObjectGenerator() {
+                @Override
+                public PemObject generate() throws PemGenerationException {
+                    pubKeyPemObj = new PemObject("PublicKey", publicKey.getEncoded());
+                    return pubKeyPemObj;
+                }
+            });
+        } catch (IOException e) {
             e.printStackTrace();
         }
 
-        return null;
+        return sw.toString();
     }
 
-
-
-    public static PrivateKey stringToPrivateKey(byte[] key){
-        try{
-            byte[] byteKey = Base64.decode(key, Base64.DEFAULT);
-            X509EncodedKeySpec X509privateKey = new X509EncodedKeySpec(byteKey);
-            KeyFactory kf = KeyFactory.getInstance("RSA");
-
-            return kf.generatePrivate(X509privateKey);
-        }
-        catch(Exception e){
+    public String generateMessagePEM() {
+        StringWriter sw = new StringWriter();
+        PemWriter pw = new PemWriter(sw);
+        try {
+            pw.writeObject(new PemObjectGenerator() {
+                @Override
+                public PemObject generate() throws PemGenerationException {
+                    messagePemObj = new PemObject("Message", encryptedTextView.getText().toString().getBytes());
+                    return messagePemObj;
+                }
+            });
+        } catch (IOException e) {
             e.printStackTrace();
         }
 
-        return null;
-    }*/
+        return sw.toString();
+    }
+
+    @Override
+    public void onResume(){
+        super.onResume();
+        if (NfcAdapter.getDefaultAdapter(this) != null) {
+            NfcAdapter.getDefaultAdapter(this).enableForegroundDispatch(this, pi, intentFiltersArray, null);
+            if (NfcAdapter.ACTION_NDEF_DISCOVERED.equals(getIntent().getAction())) {
+                processBeam(getIntent());
+            }
+        }
+    }
+
+    public void processBeam(Intent intent) {
+        Parcelable[] rawMsgs = intent.getParcelableArrayExtra(
+                NfcAdapter.EXTRA_NDEF_MESSAGES);
+        // only one message sent during the beam
+        if (rawMsgs != null){
+            NdefMessage msg = (NdefMessage) rawMsgs[0];
+
+            String messagePem = new String(msg.getRecords()[1].getPayload());
+            String pubKeyPem = new String(msg.getRecords()[0].getPayload());
+        }
+    }
+
+    public NdefMessage createNdefMessage(NfcEvent event) {
+        NdefMessage msg = new NdefMessage(
+                new NdefRecord[] { NdefRecord.createMime(
+                        "application/edu.temple.androidbeam", generatePubKeyPEM().getBytes()),
+                        NdefRecord.createMime(
+                                "application/edu.temple.androidbeam", generatePubKeyPEM().getBytes())
+                });
+
+        return msg;
+    }
+
+
 }
